@@ -1,9 +1,9 @@
-#include <GL/glew.h>
+﻿#include <GL/glew.h>
 #include <GLFW/glfw3.h>
-
 #include <iostream>
 
 #include "src/Util.h"
+#include "src/TextUtil.h"
 
 // handles errors and terminates the application
 int terminateWithError(const char* message)
@@ -16,9 +16,6 @@ int terminateWithError(const char* message)
 // define application constants
 constexpr unsigned int WINDOW_WIDTH = 1200;
 constexpr unsigned int WINDOW_HEIGHT = 800;
-constexpr float CONTROL_PANEL_RATIO = 0.5f;
-constexpr float ELEVATOR_SCENE_RATIO = 0.5f;
-
 
 int main()
 {
@@ -33,17 +30,13 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    // create the application window
+    // create the application window and context
     GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "WOOHP Elevator", nullptr, nullptr);
 
     if (window == nullptr)
     {
         return terminateWithError("Failed to create the application window.");
     }
-
-    // calculate the control panel and elevator scene dimensions
-    unsigned int controlPanelWidth = static_cast<unsigned int> (CONTROL_PANEL_RATIO * WINDOW_WIDTH);
-    unsigned int elevatorSceneWidth = static_cast<unsigned int> (ELEVATOR_SCENE_RATIO * WINDOW_WIDTH);
 
     glfwMakeContextCurrent(window);
 
@@ -53,11 +46,21 @@ int main()
         return terminateWithError("Failed to initialize GLEW.");
     }
 
-    // load the shader program
+    // load the shader programs
     unsigned int shaderProgram = createShader(
         "shaders/basic.vert",
         "shaders/basic.frag"
     );
+
+    // load font
+    if (!initText("fonts/segoeui.ttf", 48, WINDOW_WIDTH, WINDOW_HEIGHT))
+    {
+        return terminateWithError("Failed to load font.");
+    }
+
+    // enable blending for transparency
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     // control panel definition
     float controlPanelVertices[] = {
@@ -68,6 +71,7 @@ int main()
          0.0f, -1.0f, 0.910f, 0.914f, 0.922f,
     };
 
+    // VAO and VBO definition
     unsigned int controlPanelVAO;
     unsigned int controlPanelVBO;
 
@@ -86,7 +90,7 @@ int main()
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-
+    // elevator scene definition
     float elevatorSceneVertices[] = {
         // elevator scene background
          0.0f, -1.0f, 0.125f, 0.137f, 0.153f,
@@ -95,7 +99,7 @@ int main()
          1.0f, -1.0f, 0.125f, 0.137f, 0.153f,
     };
 
-
+    // VAO and VBO definition
     unsigned int elevatorSceneVAO;
     unsigned int elevatorSceneVBO;
 
@@ -107,6 +111,109 @@ int main()
     glBufferData(GL_ARRAY_BUFFER, sizeof(elevatorSceneVertices), elevatorSceneVertices, GL_STATIC_DRAW);
 
     // position attribute 
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    // color attribute
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    // control panel elements definition
+    float panelElementsVertices[] = {
+
+        // CURRENT FLOOR background
+        -0.430f,  0.760f, 0.204f, 0.224f, 0.251f,
+        -0.430f,  0.950f, 0.204f, 0.224f, 0.251f,
+        -0.080f,  0.950f, 0.204f, 0.224f, 0.251f,
+        -0.080f,  0.760f, 0.204f, 0.224f, 0.251f,
+
+        // SU
+        -0.920f,  0.200f, 0.780f, 0.796f, 0.816f,
+        -0.920f,  0.370f, 0.780f, 0.796f, 0.816f,
+        -0.730f,  0.370f, 0.780f, 0.796f, 0.816f,
+        -0.730f,  0.200f, 0.780f, 0.796f, 0.816f,
+
+        // PR
+        -0.710f,  0.200f, 0.780f, 0.796f, 0.816f,
+        -0.710f,  0.370f, 0.780f, 0.796f, 0.816f,
+        -0.520f,  0.370f, 0.780f, 0.796f, 0.816f,
+        -0.520f,  0.200f, 0.780f, 0.796f, 0.816f,
+
+        // Floor 1
+        -0.500f,  0.200f, 0.780f, 0.796f, 0.816f,
+        -0.500f,  0.370f, 0.780f, 0.796f, 0.816f,
+        -0.310f,  0.370f, 0.780f, 0.796f, 0.816f,
+        -0.310f,  0.200f, 0.780f, 0.796f, 0.816f,
+
+        // Floor 2
+        -0.290f,  0.200f, 0.780f, 0.796f, 0.816f,
+        -0.290f,  0.370f, 0.780f, 0.796f, 0.816f,
+        -0.100f,  0.370f, 0.780f, 0.796f, 0.816f,
+        -0.100f,  0.200f, 0.780f, 0.796f, 0.816f,
+
+        // Floor 3
+        -0.920f, -0.020f, 0.780f, 0.796f, 0.816f,
+        -0.920f,  0.150f, 0.780f, 0.796f, 0.816f,
+        -0.730f,  0.150f, 0.780f, 0.796f, 0.816f,
+        -0.730f, -0.020f, 0.780f, 0.796f, 0.816f,
+
+        // Floor 4
+        -0.710f, -0.020f, 0.780f, 0.796f, 0.816f,
+        -0.710f,  0.150f, 0.780f, 0.796f, 0.816f,
+        -0.520f,  0.150f, 0.780f, 0.796f, 0.816f,
+        -0.520f, -0.020f, 0.780f, 0.796f, 0.816f,
+
+        // Floor 5
+        -0.500f, -0.020f, 0.780f, 0.796f, 0.816f,
+        -0.500f,  0.150f, 0.780f, 0.796f, 0.816f,
+        -0.310f,  0.150f, 0.780f, 0.796f, 0.816f,
+        -0.310f, -0.020f, 0.780f, 0.796f, 0.816f,
+
+        // Floor 6
+        -0.290f, -0.020f, 0.780f, 0.796f, 0.816f,
+        -0.290f,  0.150f, 0.780f, 0.796f, 0.816f,
+        -0.100f,  0.150f, 0.780f, 0.796f, 0.816f,
+        -0.100f, -0.020f, 0.780f, 0.796f, 0.816f,
+
+        // OPEN DOOR
+        -0.920f, -0.310f, 0.204f, 0.224f, 0.251f,
+        -0.920f, -0.480f, 0.204f, 0.224f, 0.251f,
+        -0.510f, -0.480f, 0.204f, 0.224f, 0.251f,
+        -0.510f, -0.310f, 0.204f, 0.224f, 0.251f,
+
+        // CLOSE DOOR
+        -0.490f, -0.310f, 0.204f, 0.224f, 0.251f,
+        -0.490f, -0.480f, 0.204f, 0.224f, 0.251f,
+        -0.080f, -0.480f, 0.204f, 0.224f, 0.251f,
+        -0.080f, -0.310f, 0.204f, 0.224f, 0.251f,
+
+        // STOP
+        -0.920f, -0.530f, 0.145f, 0.157f, 0.176f,
+        -0.920f, -0.700f, 0.145f, 0.157f, 0.176f,
+        -0.510f, -0.700f, 0.145f, 0.157f, 0.176f,
+        -0.510f, -0.530f, 0.145f, 0.157f, 0.176f,
+
+        // VENTILATION
+        -0.490f, -0.530f, 0.204f, 0.224f, 0.251f,
+        -0.490f, -0.700f, 0.204f, 0.224f, 0.251f,
+        -0.080f, -0.700f, 0.204f, 0.224f, 0.251f,
+        -0.080f, -0.530f, 0.204f, 0.224f, 0.251f,
+
+    };
+
+    // VAO and VBO definition
+    unsigned int panelElementsVAO;
+    unsigned int panelElementsVBO;
+
+    glGenVertexArrays(1, &panelElementsVAO);
+    glGenBuffers(1, &panelElementsVBO);
+
+    glBindVertexArray(panelElementsVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, panelElementsVBO);
+
+    glBufferData(GL_ARRAY_BUFFER, sizeof(panelElementsVertices), panelElementsVertices, GL_STATIC_DRAW);
+
+    // position attribute
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
@@ -132,6 +239,48 @@ int main()
         glBindVertexArray(elevatorSceneVAO);
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
+        // draw control panel elements
+        glBindVertexArray(panelElementsVAO);
+        for (int i = 0; i < 13; i++)
+        {
+            glDrawArrays(GL_TRIANGLE_FAN, i * 4, 4);
+        }
+
+        // draw text 
+        // header for control panel
+        renderText("WOOHP.", -0.92f, 0.86f, 0.8f, 0.125f, 0.137f, 0.153f);
+        renderText("ELEVATOR MANAGEMENT SYSTEM", -0.92f, 0.79f, 0.28f, 0.4f, 0.4f, 0.45f);
+
+        // current floor
+        renderTextCentered("CURRENT FLOOR", -0.255f, 0.915f, 0.28f, 0.7f, 0.72f, 0.75f);
+        renderTextCentered("01", -0.255f, 0.835f, 0.8f, 1.0f, 1.0f, 1.0f);
+
+        // subtitles for control panel
+        renderText("Lift control", -0.92f, 0.66f, 0.7f, 0.125f, 0.137f, 0.153f);
+        renderText("Select your destination floor", -0.92f, 0.57f, 0.32f, 0.4f, 0.4f, 0.45f);
+        renderText("FLOOR SELECTION", -0.92f, 0.44f, 0.3f, 0.4f, 0.4f, 0.45f);
+
+        // buttons
+        renderTextCentered("SU", -0.825f, 0.285f, 0.6f, 0.125f, 0.137f, 0.153f);
+        renderTextCentered("PR", -0.615f, 0.285f, 0.6f, 0.125f, 0.137f, 0.153f);
+        renderTextCentered("1", -0.405f, 0.285f, 0.6f, 0.125f, 0.137f, 0.153f);
+        renderTextCentered("2", -0.195f, 0.285f, 0.6f, 0.125f, 0.137f, 0.153f);
+        renderTextCentered("3", -0.825f, 0.065f, 0.6f, 0.125f, 0.137f, 0.153f);
+        renderTextCentered("4", -0.615f, 0.065f, 0.6f, 0.125f, 0.137f, 0.153f);
+        renderTextCentered("5", -0.405f, 0.065f, 0.6f, 0.125f, 0.137f, 0.153f);
+        renderTextCentered("6", -0.195f, 0.065f, 0.6f, 0.125f, 0.137f, 0.153f);
+
+        // controls
+        renderText("EMERGENCY CONTROL", -0.92f, -0.23f, 0.3f, 0.4f, 0.4f, 0.45f);
+        renderTextCentered("OPEN DOOR", -0.715f, -0.395f, 0.45f, 1.0f, 1.0f, 1.0f);
+        renderTextCentered("CLOSE DOOR", -0.285f, -0.395f, 0.45f, 1.0f, 1.0f, 1.0f);
+        renderTextCentered("STOP", -0.715f, -0.615f, 0.5f, 0.871f, 0.529f, 0.535f);
+        renderTextCentered("FAN", -0.285f, -0.575f, 0.4f, 0.588f, 0.651f, 0.647f);
+        renderTextCentered("VENTILATION", -0.285f, -0.645f, 0.45f, 0.588f, 0.651f, 0.647f);
+
+        // header for control panel
+        renderTextCentered("WOOHP ELEVATOR", 0.5f, 0.92f, 0.6f, 0.9f, 0.9f, 0.92f);
+
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
@@ -141,7 +290,10 @@ int main()
     glDeleteBuffers(1, &controlPanelVBO);
     glDeleteVertexArrays(1, &elevatorSceneVAO);
     glDeleteBuffers(1, &elevatorSceneVBO);
+    glDeleteVertexArrays(1, &panelElementsVAO);
+    glDeleteBuffers(1, &panelElementsVBO);
     glDeleteProgram(shaderProgram);
+    cleanupText();
 
     // close the application.
     glfwDestroyWindow(window);
