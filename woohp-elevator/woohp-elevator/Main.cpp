@@ -1,7 +1,7 @@
 ﻿#include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
-
+#include <cmath>
 #include "src/Util.h"
 #include "src/TextUtil.h"
 
@@ -16,6 +16,288 @@ int terminateWithError(const char* message)
 // define application constants
 constexpr unsigned int WINDOW_WIDTH = 1200;
 constexpr unsigned int WINDOW_HEIGHT = 800;
+
+// define floor height
+float floorHeight[] = { -0.875f, -0.625f, -0.375f, -0.125f, 0.125f, 0.375f, 0.625f, 0.875f };
+
+// define selected floor
+bool floorSelected[8] = { false };
+
+// define elevator state
+enum ElevatorState { IDLE, MOVING, DOOR_OPENING, DOOR_OPEN, DOOR_CLOSING };
+
+// define elevator direction
+enum Direction { NONE, UP, DOWN };
+
+// define floor label
+const char* floorLabels[] = { "SU","PR","01","02", "03", "04", "05", "06" };
+
+// define elevator variables
+int currentFloorIndex = 2;
+int targetFloorIndex = 2;
+float elevatorY = floorHeight[currentFloorIndex];
+float elevatorSpeed = 0.4f;
+float delta = 0.0;
+ElevatorState state = IDLE;
+Direction direction = NONE;
+float doorTimer = 0.0f;   
+float doorTimerLimit = 5.0f;
+bool timerExtend = false;
+float doorOpenAmount = 0.0f;
+float doorSpeed = 2.0f; 
+
+enum Button {
+    BTN_NONE = -1, BTN_SU, BTN_PR, BTN_1, BTN_2, BTN_3, BTN_4, 
+    BTN_5, BTN_6, BTN_OPEN, BTN_CLOSE, BTN_STOP, BTN_VENT
+};
+
+struct ButtonRectangle { float x1, y1, x2, y2; };
+ButtonRectangle buttonRects[] = {
+    {-0.920f,  0.200f, -0.730f,  0.370f},  // SU
+    {-0.710f,  0.200f, -0.520f,  0.370f},  // PR
+    {-0.500f,  0.200f, -0.310f,  0.370f},  // 1
+    {-0.290f,  0.200f, -0.100f,  0.370f},  // 2
+    {-0.920f, -0.020f, -0.730f,  0.150f},  // 3
+    {-0.710f, -0.020f, -0.520f,  0.150f},  // 4
+    {-0.500f, -0.020f, -0.310f,  0.150f},  // 5
+    {-0.290f, -0.020f, -0.100f,  0.150f},  // 6
+    {-0.920f, -0.480f, -0.510f, -0.310f},  // OPEN
+    {-0.490f, -0.480f, -0.080f, -0.310f},  // CLOSE
+    {-0.920f, -0.700f, -0.510f, -0.530f},  // STOP
+    {-0.490f, -0.700f, -0.080f, -0.530f},  // VENT
+};
+
+Button getPressedButton(float x, float y) {
+    for (int i = 0; i < 12; i++) {
+        const ButtonRectangle& button = buttonRects[i];
+        if (x >= button.x1 && x <= button.x2 && y >= button.y1 && y <= button.y2)
+        {
+            return (Button)i;
+        }
+    }
+    return BTN_NONE;
+}
+
+std::string getCurrentFloorLabel() {
+    for (int i = 7; i >= 0; i--) {
+        if (elevatorY >= floorHeight[i]) {
+            return floorLabels[i];
+        }
+    }
+    return "";
+}
+
+int findSelectedFloor() {
+    if (direction == NONE) {
+        int nearestFloorIndex= -1;
+        int nearestDistance = 100;
+        for (int i = 0; i < 8; i++) {
+            if (i != currentFloorIndex && floorSelected[i]) {
+                if (abs(currentFloorIndex - i) < nearestDistance) {
+                    nearestDistance = abs(currentFloorIndex - i);
+                    nearestFloorIndex = i;
+                }
+            }
+        }
+
+        if (nearestDistance == 100) {
+            direction = NONE;
+            return -1;
+        }
+
+        if (currentFloorIndex > nearestFloorIndex) {
+            direction = DOWN;
+            return nearestFloorIndex;
+        }
+
+        else {
+            direction = UP;
+            return nearestFloorIndex;
+        }
+    }
+    if (direction == UP) {
+        for (int i = currentFloorIndex + 1; i < 8; i++) {
+            if (floorSelected[i]) {
+                return i;
+            }
+        }
+
+        for (int i = currentFloorIndex - 1; i >= 0; i--) {
+            if (floorSelected[i]) {
+                direction = DOWN;
+                return i;
+            }
+        }
+    }
+    else {
+        for (int i = currentFloorIndex - 1; i >= 0; i--) {
+            if (floorSelected[i]) {
+                return i;
+            }
+        }
+        for (int i = currentFloorIndex + 1; i < 8; i++) {
+            if (floorSelected[i]) {
+                direction = UP;
+                return i;
+            }
+        }
+    }
+    direction = NONE;
+    return -1;
+}
+
+void updateElevator() {
+    switch (state) {
+        case IDLE:{
+            floorSelected[currentFloorIndex] = false;
+            int selectedFloor = findSelectedFloor();
+            if (selectedFloor != -1) {
+                targetFloorIndex = selectedFloor;
+                state = MOVING;
+            }
+            break;
+        }
+        case MOVING: {
+            // pick up a floor that was selected on the way to the target
+            if (direction == UP) {
+                for (int i = currentFloorIndex + 1; i < targetFloorIndex; i++) {
+                    if (floorSelected[i] && floorHeight[i] > elevatorY) {
+                        targetFloorIndex = i;
+                        break;
+                    }
+                }
+            }
+            else if (direction == DOWN) {
+                for (int i = currentFloorIndex - 1; i > targetFloorIndex; i--) {
+                    if (floorSelected[i] && floorHeight[i] < elevatorY) {
+                        targetFloorIndex = i;
+                        break;
+                    }
+                }
+            }
+            
+            // move the elevator towards the target floor at constant speed
+            float targetY = floorHeight[targetFloorIndex];
+
+            // calculate how far the elevator can move during this frame
+            float step = elevatorSpeed * delta;
+
+            // check whether the elevator can reach the destination during this frame
+            if (fabs(targetY - elevatorY) <= step)
+            {
+                // place the elevator at the destination floor
+                elevatorY = targetY;
+
+                // update the current floor index because the elevator has arrived
+                currentFloorIndex = targetFloorIndex;
+
+                // update elevator state
+                floorSelected[currentFloorIndex] = false;
+                doorTimer = 0.0f;
+                doorTimerLimit = 5.0f;
+                timerExtend = false;
+                state = DOOR_OPENING;
+            }
+
+            //  if destination is above the current elevator position, go up
+            else if (targetY > elevatorY)
+            {
+                elevatorY += step;
+            }
+            // if destination below the current elevator position, go down
+            else
+            {
+                elevatorY -= step;
+            }
+            break;
+        }
+        case DOOR_OPENING:
+        {
+            doorOpenAmount += doorSpeed * delta;
+            if (doorOpenAmount >= 1.0f) {
+                doorOpenAmount = 1.0f;
+                state = DOOR_OPEN;
+            }
+            break;
+        }
+        case DOOR_OPEN:
+        {
+            doorTimer += delta;
+            if (doorTimer >= doorTimerLimit) {
+                state = DOOR_CLOSING;
+            }
+            break;
+        }
+        case DOOR_CLOSING:
+        {
+            doorOpenAmount -= doorSpeed * delta;
+            if (doorOpenAmount <= 0.0f) {
+                doorOpenAmount = 0.0f;
+                timerExtend = false;
+                state = IDLE;
+            }
+            break;
+        }
+        default: break;
+    }
+}
+
+// callback function for mouse input
+void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
+    // centers the shape if the left mouse button is pressed and the cursor is within the bounds of the shape
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+
+        // callculates the window size
+        int width, height;
+        glfwGetWindowSize(window, &width, &height);
+
+        // callculate the cursor position
+        double xpos, ypos;
+        glfwGetCursorPos(window, &xpos, &ypos);
+
+        // normalize the cursor position to OpenGL range [-1,1]
+        float xposNorm = (float) (xpos / width) * 2 - 1;
+        float yposNorm = -((float)(ypos / height) * 2 - 1);
+
+        // calculate which button was pressed
+        Button pressed = getPressedButton(xposNorm, yposNorm);
+        if (pressed >= BTN_SU && pressed <= BTN_6) {
+            int floor = (int)pressed;
+
+            // elevator is stopped at this exact floor
+            bool elevatorIsHere = (state != MOVING) && (floor == currentFloorIndex) && fabs(elevatorY - floorHeight[floor]) < 0.001f;
+
+            if (elevatorIsHere) {
+                // reopen the doors (if already open or opening, do nothing)
+                if (state == IDLE || state == DOOR_CLOSING) {
+                    doorTimer = 0.0f;
+                    doorTimerLimit = 5.0f;
+                    timerExtend = false;
+                    state = DOOR_OPENING;
+                }
+            }
+            else {
+                floorSelected[floor] = true;
+            }
+        }
+        
+        else if (pressed == BTN_OPEN) {
+            // extend the open period by 5s, only once per open period
+            if ((state == DOOR_OPEN || state == DOOR_OPENING) && !timerExtend) {
+                timerExtend = true;
+                doorTimerLimit += 5.0f;
+            }
+        }
+
+        else if (pressed == BTN_CLOSE) {
+            // close the doors immediately
+            if (state == DOOR_OPEN || state == DOOR_OPENING) {
+                state = DOOR_CLOSING;
+            }
+        }
+    }
+}
+
 
 int main()
 {
@@ -39,6 +321,9 @@ int main()
     }
 
     glfwMakeContextCurrent(window);
+
+    // register callback functions
+    glfwSetMouseButtonCallback(window, mouseCallback);
 
     // initialize GLEW
     if (glewInit() != GLEW_OK)
@@ -65,10 +350,10 @@ int main()
     // control panel definition
     float controlPanelVertices[] = {
         // control panel area background
-        -1.0f, -1.0f, 0.910f, 0.914f, 0.922f,
-        -1.0f,  1.0f, 0.910f, 0.914f, 0.922f,
-         0.0f,  1.0f, 0.910f, 0.914f, 0.922f,
-         0.0f, -1.0f, 0.910f, 0.914f, 0.922f,
+        -1.0f, -1.0f, 0.865f, 0.868f, 0.876f,
+        -1.0f,  1.0f, 0.865f, 0.868f, 0.876f,
+         0.0f,  1.0f, 0.865f, 0.868f, 0.876f,
+         0.0f, -1.0f, 0.865f, 0.868f, 0.876f,
     };
 
     // VAO and VBO definition
@@ -198,7 +483,6 @@ int main()
         -0.490f, -0.700f, 0.204f, 0.224f, 0.251f,
         -0.080f, -0.700f, 0.204f, 0.224f, 0.251f,
         -0.080f, -0.530f, 0.204f, 0.224f, 0.251f,
-
     };
 
     // VAO and VBO definition
@@ -287,7 +571,7 @@ int main()
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // floor doors definition (8 floors, each: frame + door)
+    // floor doors definition (8 floors, each: frame + door + vertical lines)
     float floorDoorsVertices[] = {
 
         // SU - frame
@@ -378,7 +662,7 @@ int main()
         0.95f,  0.96f, 0.145f, 0.157f, 0.176f,
         0.95f,  0.78f, 0.145f, 0.157f, 0.176f,
 
-        // DOOR CENTER LINES (8 vertical lines, one per floor)
+        // DOOR CENTER LINES
         0.88f, -0.97f, 0.204f, 0.224f, 0.251f,   // SU
         0.88f, -0.79f, 0.204f, 0.224f, 0.251f,
 
@@ -424,7 +708,7 @@ int main()
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // elevator definition (starts on floor 1)
+    // elevator definition 
     float elevatorVertices[] = {
 
         // ELEVATOR outer frame
@@ -439,9 +723,15 @@ int main()
         0.95f, -0.29f, 0.145f, 0.157f, 0.176f,
         0.95f, -0.47f, 0.145f, 0.157f, 0.176f,
 
-        // ELEVATOR door
+        // ELEVATOR left door half
         0.81f, -0.47f, 0.651f, 0.725f, 0.718f,
         0.81f, -0.29f, 0.651f, 0.725f, 0.718f,
+        0.88f, -0.29f, 0.651f, 0.725f, 0.718f,
+        0.88f, -0.47f, 0.651f, 0.725f, 0.718f,
+
+        // ELEVATOR right door half
+        0.88f, -0.47f, 0.651f, 0.725f, 0.718f,
+        0.88f, -0.29f, 0.651f, 0.725f, 0.718f,
         0.95f, -0.29f, 0.651f, 0.725f, 0.718f,
         0.95f, -0.47f, 0.651f, 0.725f, 0.718f,
 
@@ -449,7 +739,6 @@ int main()
         0.88f, -0.47f, 0.204f, 0.224f, 0.251f,
         0.88f, -0.29f, 0.204f, 0.224f, 0.251f,
     };
-
 
     // VAO and VBO definition
     unsigned int elevatorVAO;
@@ -471,16 +760,103 @@ int main()
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
+    // button frames (white outline) definition
+    float buttonFrameVertices[] = {
+        // SU
+        -0.920f,  0.200f, 1.0f, 1.0f, 1.0f,
+        -0.920f,  0.370f, 1.0f, 1.0f, 1.0f,
+        -0.730f,  0.370f, 1.0f, 1.0f, 1.0f,
+        -0.730f,  0.200f, 1.0f, 1.0f, 1.0f,
+        // PR
+        -0.710f,  0.200f, 1.0f, 1.0f, 1.0f,
+        -0.710f,  0.370f, 1.0f, 1.0f, 1.0f,
+        -0.520f,  0.370f, 1.0f, 1.0f, 1.0f,
+        -0.520f,  0.200f, 1.0f, 1.0f, 1.0f,
+        // 1
+        -0.500f,  0.200f, 1.0f, 1.0f, 1.0f,
+        -0.500f,  0.370f, 1.0f, 1.0f, 1.0f,
+        -0.310f,  0.370f, 1.0f, 1.0f, 1.0f,
+        -0.310f,  0.200f, 1.0f, 1.0f, 1.0f,
+        // 2
+        -0.290f,  0.200f, 1.0f, 1.0f, 1.0f,
+        -0.290f,  0.370f, 1.0f, 1.0f, 1.0f,
+        -0.100f,  0.370f, 1.0f, 1.0f, 1.0f,
+        -0.100f,  0.200f, 1.0f, 1.0f, 1.0f,
+        // 3
+        -0.920f, -0.020f, 1.0f, 1.0f, 1.0f,
+        -0.920f,  0.150f, 1.0f, 1.0f, 1.0f,
+        -0.730f,  0.150f, 1.0f, 1.0f, 1.0f,
+        -0.730f, -0.020f, 1.0f, 1.0f, 1.0f,
+        // 4
+        -0.710f, -0.020f, 1.0f, 1.0f, 1.0f,
+        -0.710f,  0.150f, 1.0f, 1.0f, 1.0f,
+        -0.520f,  0.150f, 1.0f, 1.0f, 1.0f,
+        -0.520f, -0.020f, 1.0f, 1.0f, 1.0f,
+        // 5
+        -0.500f, -0.020f, 1.0f, 1.0f, 1.0f,
+        -0.500f,  0.150f, 1.0f, 1.0f, 1.0f,
+        -0.310f,  0.150f, 1.0f, 1.0f, 1.0f,
+        -0.310f, -0.020f, 1.0f, 1.0f, 1.0f,
+        // 6
+        -0.290f, -0.020f, 1.0f, 1.0f, 1.0f,
+        -0.290f,  0.150f, 1.0f, 1.0f, 1.0f,
+        -0.100f,  0.150f, 1.0f, 1.0f, 1.0f,
+        -0.100f, -0.020f, 1.0f, 1.0f, 1.0f,
+    };
 
+    // VAO and VBO definition
+    unsigned int buttonFrameVAO;
+    unsigned int buttonFrameVBO;
+
+    glGenVertexArrays(1, &buttonFrameVAO);
+    glGenBuffers(1, &buttonFrameVBO);
+
+    glBindVertexArray(buttonFrameVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, buttonFrameVBO);
+
+    glBufferData(GL_ARRAY_BUFFER, sizeof(buttonFrameVertices), buttonFrameVertices, GL_STATIC_DRAW);
+
+    // position attribute
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    // color attribute
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    
     // set the background color
     glClearColor(0.08f, 0.09f, 0.10f, 1.0f);
+
+    // uniform variable locations
+    int uPosLoc = glGetUniformLocation(shaderProgram, "uPos");
+
+    // get the current time before entering the rendering loop
+    double lastTime = glfwGetTime();
 
     // main rendering loop
     while (!glfwWindowShouldClose(window))
     {
+        // get the current time
+        double now = glfwGetTime();
+
+        // calculate the time elapsed since the previous frame
+        delta = (float)(now - lastTime);
+
+        // update the previous frame time
+        lastTime = now;
+
+        // elevator vertical position
+        updateElevator();
+
+        // calculate the difference between its current position and its original position
+        float elevatorOffset = elevatorY - floorHeight[2];
+
         glClear(GL_COLOR_BUFFER_BIT);
 
         glUseProgram(shaderProgram);
+
+        // set uniform default value
+        glUniform2f(uPosLoc, 0.0f, 0.0f);
 
         // draw the control panel area background
         glBindVertexArray(controlPanelVAO);
@@ -509,20 +885,63 @@ int main()
         // door center lines
         glDrawArrays(GL_LINES, 64, 16);
 
-        // draw elevator
+        // set the elevator's vertical position using the calculated offset
+                // set the elevator's vertical position using the calculated offset
+        glUniform2f(uPosLoc, 0.0f, elevatorOffset);
         glBindVertexArray(elevatorVAO);
-        for (int i = 0; i < 3; i++)
-        {
-            glDrawArrays(GL_TRIANGLE_FAN, i * 4, 4);
+
+        // draw elevator frame (not clipped)
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+        // calculate elevator clipping rectangle (cabin interior)
+        int clipX = (int)((0.81f + 1.0f) / 2.0f * WINDOW_WIDTH);
+        int clipY = (int)((-0.47f + elevatorOffset + 1.0f) / 2.0f * WINDOW_HEIGHT);
+        int clipWidth = (int)((0.95f - 0.81f) / 2.0f * WINDOW_WIDTH);
+        int clipHeight = (int)((-0.29f + 0.47f) / 2.0f * WINDOW_HEIGHT);
+
+        // enable clipping so the door halves don't leave the cabin
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(clipX, clipY, clipWidth, clipHeight);
+
+        // draw cabin interior
+        glDrawArrays(GL_TRIANGLE_FAN, 4, 4);
+
+        float doorMove = doorOpenAmount * 0.07f;
+
+        // draw left half door
+        glUniform2f(uPosLoc, -doorMove, elevatorOffset);
+        glDrawArrays(GL_TRIANGLE_FAN, 8, 4);
+
+        // draw right half door
+        glUniform2f(uPosLoc, doorMove, elevatorOffset);
+        glDrawArrays(GL_TRIANGLE_FAN, 12, 4);
+
+        // disable clipping, otherwise glClear and everything else gets clipped
+        glDisable(GL_SCISSOR_TEST);
+
+        if (doorOpenAmount == 0) {
+            // elevator door center line
+            glUniform2f(uPosLoc, 0.0f, elevatorOffset);
+            glDrawArrays(GL_LINES, 16, 2);
         }
-        // elevator door center line
-        glDrawArrays(GL_LINES, 12, 2);
+
+        // reset offset so the control panel is not moved
+        glUniform2f(uPosLoc, 0.0f, 0.0f);
 
         // draw control panel elements
         glBindVertexArray(panelElementsVAO);
         for (int i = 0; i < 13; i++)
         {
             glDrawArrays(GL_TRIANGLE_FAN, i * 4, 4);
+        }
+
+        // draw white button frame if button is selected
+        glBindVertexArray(buttonFrameVAO);
+        glLineWidth(3.0f);
+        for (int i = 0; i < 8; i++) {
+            if (floorSelected[i]) {
+                glDrawArrays(GL_LINE_LOOP, i * 4, 4);
+            }
         }
 
         // draw text 
@@ -532,7 +951,7 @@ int main()
 
         // current floor
         renderTextCentered("CURRENT FLOOR", -0.255f, 0.915f, 0.28f, 0.7f, 0.72f, 0.75f);
-        renderTextCentered("01", -0.255f, 0.835f, 0.8f, 1.0f, 1.0f, 1.0f);
+        renderTextCentered(getCurrentFloorLabel(), -0.255f, 0.835f, 0.8f, 1.0f, 1.0f, 1.0f);
 
         // subtitles for control panel
         renderText("Lift control", -0.92f, 0.66f, 0.7f, 0.125f, 0.137f, 0.153f);
@@ -585,6 +1004,8 @@ int main()
     glDeleteBuffers(1, &floorDoorsVBO);
     glDeleteVertexArrays(1, &elevatorVAO);
     glDeleteBuffers(1, &elevatorVBO);
+    glDeleteVertexArrays(1, &buttonFrameVAO);
+    glDeleteBuffers(1, &buttonFrameVBO);
     cleanupText();
 
     // close the application.
