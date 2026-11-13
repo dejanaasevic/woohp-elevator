@@ -24,7 +24,7 @@ float floorHeight[] = { -0.875f, -0.625f, -0.375f, -0.125f, 0.125f, 0.375f, 0.62
 bool floorSelected[8] = { false };
 
 // define elevator state
-enum ElevatorState { IDLE, MOVING, DOOR_OPENING, DOOR_OPEN, DOOR_CLOSING };
+enum ElevatorState { IDLE, MOVING, DOOR_OPENING, DOOR_OPEN, DOOR_CLOSING, STOPPED };
 
 // define elevator direction
 enum Direction { NONE, UP, DOWN };
@@ -50,6 +50,9 @@ enum Button {
     BTN_NONE = -1, BTN_SU, BTN_PR, BTN_1, BTN_2, BTN_3, BTN_4, 
     BTN_5, BTN_6, BTN_OPEN, BTN_CLOSE, BTN_STOP, BTN_VENT
 };
+
+bool controlButtonActive[4] = { false };
+enum ControlButton { OPEN_BUTTON, CLOSE_BUTTON, STOP_BUTTON, VENT_BUTTON};
 
 struct ButtonRectangle { float x1, y1, x2, y2; };
 ButtonRectangle buttonRects[] = {
@@ -234,11 +237,22 @@ void updateElevator() {
             if (doorOpenAmount <= 0.0f) {
                 doorOpenAmount = 0.0f;
                 timerExtend = false;
+                controlButtonActive[OPEN_BUTTON] = false;
+                controlButtonActive[CLOSE_BUTTON] = false;
                 state = IDLE;
             }
             break;
         }
-        default: break;
+
+        case STOPPED:
+        {
+            break;
+        }
+
+        default: 
+        {
+            break;
+        }
     }
 }
 
@@ -284,6 +298,7 @@ void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
         else if (pressed == BTN_OPEN) {
             // extend the open period by 5s, only once per open period
             if ((state == DOOR_OPEN || state == DOOR_OPENING) && !timerExtend) {
+                controlButtonActive[OPEN_BUTTON] = true;
                 timerExtend = true;
                 doorTimerLimit += 5.0f;
             }
@@ -292,7 +307,20 @@ void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
         else if (pressed == BTN_CLOSE) {
             // close the doors immediately
             if (state == DOOR_OPEN || state == DOOR_OPENING) {
+                controlButtonActive[CLOSE_BUTTON] = true;
                 state = DOOR_CLOSING;
+            }
+        }
+
+        else if (pressed == BTN_STOP) {
+            // stops the elevator immediately if elevator is moving
+            if (state == MOVING) {
+                controlButtonActive[STOP_BUTTON] = true;
+                state = STOPPED;
+            }
+            else if (state == STOPPED) {
+                controlButtonActive[STOP_BUTTON] = false;
+                state = MOVING;
             }
         }
     }
@@ -350,10 +378,10 @@ int main()
     // control panel definition
     float controlPanelVertices[] = {
         // control panel area background
-        -1.0f, -1.0f, 0.865f, 0.868f, 0.876f,
-        -1.0f,  1.0f, 0.865f, 0.868f, 0.876f,
-         0.0f,  1.0f, 0.865f, 0.868f, 0.876f,
-         0.0f, -1.0f, 0.865f, 0.868f, 0.876f,
+        -1.0f, -1.0f, 0.822f, 0.825f, 0.832f,
+        -1.0f,  1.0f, 0.822f, 0.825f, 0.832f,
+         0.0f,  1.0f, 0.822f, 0.825f, 0.832f,
+         0.0f, -1.0f, 0.822f, 0.825f, 0.832f,
     };
 
     // VAO and VBO definition
@@ -760,7 +788,7 @@ int main()
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // button frames (white outline) definition
+    // button frames outline definition
     float buttonFrameVertices[] = {
         // SU
         -0.920f,  0.200f, 1.0f, 1.0f, 1.0f,
@@ -802,6 +830,30 @@ int main()
         -0.290f,  0.150f, 1.0f, 1.0f, 1.0f,
         -0.100f,  0.150f, 1.0f, 1.0f, 1.0f,
         -0.100f, -0.020f, 1.0f, 1.0f, 1.0f,
+
+        // OPEN DOOR
+        -0.920f, -0.310f, 1.0f, 1.0f, 1.0f,
+        -0.920f, -0.480f, 1.0f, 1.0f, 1.0f,
+        -0.510f, -0.480f, 1.0f, 1.0f, 1.0f,
+        -0.510f, -0.310f, 1.0f, 1.0f, 1.0f,
+
+        // CLOSE DOOR
+        -0.490f, -0.310f, 1.0f, 1.0f, 1.0f,
+        -0.490f, -0.480f, 1.0f, 1.0f, 1.0f,
+        -0.080f, -0.480f, 1.0f, 1.0f, 1.0f,
+        -0.080f, -0.310f, 1.0f, 1.0f, 1.0f,
+
+        // STOP
+        -0.920f, -0.530f, 1.0f, 1.0f, 1.0f,
+        -0.920f, -0.700f, 1.0f, 1.0f, 1.0f,
+        -0.510f, -0.700f, 1.0f, 1.0f, 1.0f,
+        -0.510f, -0.530f, 1.0f, 1.0f, 1.0f,
+
+        // VENTILATION
+        -0.490f, -0.530f, 1.0f, 1.0f, 1.0f,
+        -0.490f, -0.700f, 1.0f, 1.0f, 1.0f,
+        -0.080f, -0.700f, 1.0f, 1.0f, 1.0f,
+        -0.080f, -0.530f, 1.0f, 1.0f, 1.0f,
     };
 
     // VAO and VBO definition
@@ -886,7 +938,6 @@ int main()
         glDrawArrays(GL_LINES, 64, 16);
 
         // set the elevator's vertical position using the calculated offset
-                // set the elevator's vertical position using the calculated offset
         glUniform2f(uPosLoc, 0.0f, elevatorOffset);
         glBindVertexArray(elevatorVAO);
 
@@ -941,6 +992,11 @@ int main()
         for (int i = 0; i < 8; i++) {
             if (floorSelected[i]) {
                 glDrawArrays(GL_LINE_LOOP, i * 4, 4);
+            }
+        }
+        for (int i = 0; i < 4; i++) {
+            if (controlButtonActive[i]) {
+                glDrawArrays(GL_LINE_LOOP, 32 + i * 4, 4);
             }
         }
 
