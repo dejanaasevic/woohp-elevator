@@ -46,6 +46,10 @@ bool timerExtend = false;
 float doorOpenAmount = 0.0f;
 float doorSpeed = 2.0f; 
 
+// define cursor
+GLFWcursor* cursor = nullptr;
+GLFWcursor* cursorVentilation = nullptr;
+
 enum Button {
     BTN_NONE = -1, BTN_SU, BTN_PR, BTN_1, BTN_2, BTN_3, BTN_4, 
     BTN_5, BTN_6, BTN_OPEN, BTN_CLOSE, BTN_STOP, BTN_VENT
@@ -149,7 +153,7 @@ int findSelectedFloor() {
     return -1;
 }
 
-void updateElevator() {
+void updateElevator(GLFWwindow* window) {
     switch (state) {
         case IDLE:{
             floorSelected[currentFloorIndex] = false;
@@ -188,6 +192,10 @@ void updateElevator() {
             // check whether the elevator can reach the destination during this frame
             if (fabs(targetY - elevatorY) <= step)
             {
+                // sets default cursor
+                controlButtonActive[VENT_BUTTON] = false;
+                glfwSetCursor(window, cursor);
+
                 // place the elevator at the destination floor
                 elevatorY = targetY;
 
@@ -323,6 +331,11 @@ void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
                 state = MOVING;
             }
         }
+
+        else if (pressed == BTN_VENT) {
+            controlButtonActive[VENT_BUTTON] = true;
+            glfwSetCursor(window, cursorVentilation);
+        }
     }
 }
 
@@ -349,6 +362,17 @@ int main()
     }
 
     glfwMakeContextCurrent(window);
+
+    // load cursors
+    cursor = loadImageToCursor("img/black_propeller.png");
+    cursorVentilation = loadImageToCursor("img/mint_propeller.png");
+
+    if (cursor == nullptr || cursorVentilation == nullptr) 
+    {
+        return terminateWithError("Custom cursor failed to load.");
+    }
+    controlButtonActive[VENT_BUTTON] = false;
+    glfwSetCursor(window, cursor);
 
     // register callback functions
     glfwSetMouseButtonCallback(window, mouseCallback);
@@ -898,7 +922,7 @@ int main()
         lastTime = now;
 
         // elevator vertical position
-        updateElevator();
+        updateElevator(window);
 
         // calculate the difference between its current position and its original position
         float elevatorOffset = elevatorY - floorHeight[2];
@@ -1066,6 +1090,8 @@ int main()
 
     // close the application.
     glfwDestroyWindow(window);
+    glfwDestroyCursor(cursor);
+    glfwDestroyCursor(cursorVentilation);
     glfwTerminate();
 
     return 0;

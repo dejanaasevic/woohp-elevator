@@ -16,6 +16,9 @@
     <Filter Include="Resource Files\Fonts">
       <UniqueIdentifier>{e0d6929c-ec20-4c21-9b98-165a6f117064}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Resource Files\Images">
+      <UniqueIdentifier>{22c8df27-5a36-4da5-8cb5-7a66e04dd263}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\stb_image.h">
@@ -55,5 +58,13 @@
     <Font Include="fonts\segoeui.ttf">
       <Filter>Resource Files\Fonts</Filter>
     </Font>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="img\black_propeller.png">
+      <Filter>Resource Files\Images</Filter>
+    </Image>
+    <Image Include="img\mint_propeller.png">
+      <Filter>Resource Files\Images</Filter>
+    </Image>
   </ItemGroup>
 </Project>
