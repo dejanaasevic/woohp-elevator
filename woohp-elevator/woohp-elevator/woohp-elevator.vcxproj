@@ -147,6 +147,7 @@
   <ItemGroup>
     <Image Include="img\black_propeller.png" />
     <Image Include="img\mint_propeller.png" />
+    <Image Include="img\player_walk.png" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
