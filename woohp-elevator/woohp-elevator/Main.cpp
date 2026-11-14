@@ -13,6 +13,24 @@ int terminateWithError(const char* message)
     return -1;
 }
 
+float getFloorLineY(int floorIndex) {
+    return -1.0f + 0.25f * floorIndex;
+}
+
+// helper function to load and preprocess a texture
+void preprocessTexture(unsigned& texture, const char* filepath) {
+    texture = loadImageToTexture(filepath);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+}
+
 // define application constants
 constexpr unsigned int WINDOW_WIDTH = 1200;
 constexpr unsigned int WINDOW_HEIGHT = 800;
@@ -45,6 +63,30 @@ float doorTimerLimit = 5.0f;
 bool timerExtend = false;
 float doorOpenAmount = 0.0f;
 float doorSpeed = 2.0f; 
+
+
+// define player variables
+float playerLeft = 0.15f;
+float playerRight = 0.74f;
+
+// define player state
+bool playerInsideElevator = false;
+int playerFloor = 1;
+
+// define player dimensions
+// player dimensions (in pixels)
+constexpr float PLAYER_IMG_W = 248.0f;
+constexpr float PLAYER_IMG_H = 512.0f;
+
+float playerHeight = 0.18f;  
+float playerWidth = playerHeight * (PLAYER_IMG_W / PLAYER_IMG_H) * ((float)WINDOW_HEIGHT / WINDOW_WIDTH) * 2.0f / 2.0f;
+
+// define player position
+float playerX = 0.30f;
+float playerY = getFloorLineY(playerFloor);
+float playerSpeed = 0.5f;
+
+bool facingRight = false;
 
 // define cursor
 GLFWcursor* cursor = nullptr;
@@ -394,6 +436,10 @@ int main()
     {
         return terminateWithError("Failed to load font.");
     }
+
+    // load textures
+    unsigned int player;
+    preprocessTexture(player, "img/player_idle.png");
 
     // enable blending for transparency
     glEnable(GL_BLEND);
@@ -899,12 +945,44 @@ int main()
     // color attribute
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
+
+
+    // player definition
+    float playerVertices[] = {
+        0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, playerHeight, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+        playerWidth, playerHeight, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+        playerWidth, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f
+    };
     
+    // VAO and VBO definition
+    unsigned int playerVAO;
+    unsigned int playerVBO;
+
+    glGenVertexArrays(1, &playerVAO);
+    glGenBuffers(1, &playerVBO);
+
+    glBindVertexArray(playerVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, playerVBO);
+
+    glBufferData(GL_ARRAY_BUFFER, sizeof(playerVertices), playerVertices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(5 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+
     // set the background color
     glClearColor(0.08f, 0.09f, 0.10f, 1.0f);
 
     // uniform variable locations
     int uPosLoc = glGetUniformLocation(shaderProgram, "uPos");
+    int uUseTexLoc = glGetUniformLocation(shaderProgram, "uUseTex");
+    int uFlipLoc = glGetUniformLocation(shaderProgram, "uFlip");
 
     // get the current time before entering the rendering loop
     double lastTime = glfwGetTime();
@@ -933,6 +1011,8 @@ int main()
 
         // set uniform default value
         glUniform2f(uPosLoc, 0.0f, 0.0f);
+        glUniform1i(uUseTexLoc, false);
+        glUniform1i(uFlipLoc, false);
 
         // draw the control panel area background
         glBindVertexArray(controlPanelVAO);
@@ -1023,6 +1103,35 @@ int main()
                 glDrawArrays(GL_LINE_LOOP, 32 + i * 4, 4);
             }
         }
+        
+        // define player movement
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+            if (playerX - playerSpeed * delta >= playerLeft)
+            {
+                facingRight = true;
+                playerX -= playerSpeed * delta;
+                
+            }
+        }
+
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+            if (playerX + playerSpeed * delta + playerWidth <= playerRight) 
+            {
+                facingRight = false;
+                playerX += playerSpeed * delta;
+            }
+        }
+
+        // draw player
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, player);
+        glUniform1i(uUseTexLoc, true);
+        glUniform2f(uPosLoc, playerX, playerY);
+        glUniform1i(uFlipLoc, facingRight);
+        glBindVertexArray(playerVAO);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+        glUniform1i(uUseTexLoc, false);
+
 
         // draw text 
         // header for control panel
