@@ -4,6 +4,8 @@
 #include <cmath>
 #include "src/Util.h"
 #include "src/TextUtil.h"
+#include <chrono>
+#include <thread>
 
 // handles errors and terminates the application
 int terminateWithError(const char* message)
@@ -24,16 +26,29 @@ void preprocessTexture(unsigned& texture, const char* filepath) {
 
     glGenerateMipmap(GL_TEXTURE_2D);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 }
 
-// define application constants
-constexpr unsigned int WINDOW_WIDTH = 1200;
-constexpr unsigned int WINDOW_HEIGHT = 800;
+constexpr float CABIN_LEFT = 0.81f;
+constexpr float CABIN_RIGHT = 0.95f;
+constexpr float FLOOR_OFFSET = 0.03f;
+
+unsigned int WINDOW_WIDTH = 1200;    // postaje rezolucija monitora
+unsigned int WINDOW_HEIGHT = 800;
+constexpr double FRAME_TIME = 1.0 / 75.0;
+
+constexpr float HALF_FLOOR = 0.125f;       // floorHeight[i] = linija sprata + 0.125
+
+float playerHeight = 0.18f;
+float playerWidth = 0.0f;                  // računa se u main-u
+float playerY = getFloorLineY(1);          // bez + FLOOR_OFFSET
+
+bool isWalking = false;
+float walkTimer = 0.0f;
 
 // define floor height
 float floorHeight[] = { -0.875f, -0.625f, -0.375f, -0.125f, 0.125f, 0.375f, 0.625f, 0.875f };
@@ -64,7 +79,6 @@ bool timerExtend = false;
 float doorOpenAmount = 0.0f;
 float doorSpeed = 2.0f; 
 
-
 // define player variables
 float playerLeft = 0.15f;
 float playerRight = 0.74f;
@@ -78,15 +92,11 @@ int playerFloor = 1;
 constexpr float PLAYER_IMG_W = 248.0f;
 constexpr float PLAYER_IMG_H = 512.0f;
 
-float playerHeight = 0.18f;  
-float playerWidth = playerHeight * (PLAYER_IMG_W / PLAYER_IMG_H) * ((float)WINDOW_HEIGHT / WINDOW_WIDTH) * 2.0f / 2.0f;
-
 // define player position
 float playerX = 0.30f;
-float playerY = getFloorLineY(playerFloor);
 float playerSpeed = 0.5f;
 
-bool facingRight = false;
+bool facingLeft = false;
 
 // define cursor
 GLFWcursor* cursor = nullptr;
@@ -115,6 +125,14 @@ ButtonRectangle buttonRects[] = {
     {-0.920f, -0.700f, -0.510f, -0.530f},  // STOP
     {-0.490f, -0.700f, -0.080f, -0.530f},  // VENT
 };
+
+void reopenDoors() {
+    doorTimer = 0.0f;
+    doorTimerLimit = 5.0f;
+    timerExtend = false;
+    controlButtonActive[OPEN_BUTTON] = false;
+    state = DOOR_OPENING;
+}
 
 Button getPressedButton(float x, float y) {
     for (int i = 0; i < 12; i++) {
@@ -306,10 +324,60 @@ void updateElevator(GLFWwindow* window) {
     }
 }
 
+void updatePlayer(GLFWwindow* window) {
+
+    bool elevatorHere = (state != MOVING && state != STOPPED)
+        && currentFloorIndex == playerFloor
+        && fabs(elevatorY - floorHeight[playerFloor]) < 0.001f;
+    bool doorsOpen = elevatorHere && doorOpenAmount >= 0.9f;
+
+    float minX, maxX;
+    if (playerInsideElevator) {
+        minX = doorsOpen ? playerLeft : CABIN_LEFT;
+        maxX = CABIN_RIGHT - playerWidth;
+    }
+    else {
+        minX = playerLeft;
+        maxX = doorsOpen ? (CABIN_RIGHT - playerWidth) : (playerRight - playerWidth);
+    }
+
+    float oldX = playerX;
+    float move = 0.0f;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) { move -= playerSpeed * delta; facingLeft = true; }
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) { move += playerSpeed * delta; facingLeft = false; }
+
+    playerX += move;
+    playerX = fmax(minX, fmin(playerX, maxX));
+
+    // hoda samo ako se stvarno pomerio (ne kad udara u ivicu)
+    isWalking = fabs(playerX - oldX) > 0.00001f;
+    walkTimer = isWalking ? walkTimer + delta : 0.0f;
+
+    float centerX = playerX + playerWidth / 2.0f;
+    playerInsideElevator = centerX > 0.78f;
+
+    // linija na kojoj osoba stoji
+    float lineY;
+    if (playerInsideElevator) {
+        playerFloor = currentFloorIndex;
+        lineY = elevatorY - HALF_FLOOR;          // linija lifta, vozi se sa njim
+    }
+    else {
+        lineY = getFloorLineY(playerFloor);      // linija sprata
+    }
+
+    // preko praga (x od 0.74 do 0.80) se glatko podiže na pod kabine
+    float t = fmax(0.0f, fmin((centerX - 0.74f) / 0.06f, 1.0f));
+    playerY = lineY + FLOOR_OFFSET * t;
+}
+
+
 // callback function for mouse input
 void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
     // centers the shape if the left mouse button is pressed and the cursor is within the bounds of the shape
     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+
+        if (!playerInsideElevator) return;   
 
         // callculates the window size
         int width, height;
@@ -334,10 +402,7 @@ void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
             if (elevatorIsHere) {
                 // reopen the doors (if already open or opening, do nothing)
                 if (state == IDLE || state == DOOR_CLOSING) {
-                    doorTimer = 0.0f;
-                    doorTimerLimit = 5.0f;
-                    timerExtend = false;
-                    state = DOOR_OPENING;
+                    reopenDoors();
                 }
             }
             else {
@@ -346,8 +411,13 @@ void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
         }
         
         else if (pressed == BTN_OPEN) {
-            // extend the open period by 5s, only once per open period
-            if ((state == DOOR_OPEN || state == DOOR_OPENING) && !timerExtend) {
+            bool atFloor = fabs(elevatorY - floorHeight[currentFloorIndex]) < 0.001f;
+
+            if ((state == IDLE || state == DOOR_CLOSING) && atFloor) {
+                reopenDoors();
+                controlButtonActive[OPEN_BUTTON] = true;   
+            }
+            else if ((state == DOOR_OPEN || state == DOOR_OPENING) && !timerExtend) {
                 controlButtonActive[OPEN_BUTTON] = true;
                 timerExtend = true;
                 doorTimerLimit += 5.0f;
@@ -381,6 +451,28 @@ void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
     }
 }
 
+// callback function for keyboard input 
+void keyboardCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    if (key == GLFW_KEY_C && action == GLFW_PRESS) {
+        if (!playerInsideElevator && playerX + playerWidth >= playerRight - 0.01f) {
+            bool elevatorHere = (currentFloorIndex == playerFloor) && state != MOVING && state != STOPPED;
+
+            if (elevatorHere) {
+                if (state == IDLE || state == DOOR_CLOSING) {
+                    reopenDoors();
+                }
+            }
+            else {
+                floorSelected[playerFloor] = true;
+            }
+        }
+    }
+
+    // adds exit from fullscreen mode
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+        glfwSetWindowShouldClose(window, GLFW_TRUE);
+    }
+}
 
 int main()
 {
@@ -395,8 +487,24 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+    glfwSetErrorCallback([](int code, const char* msg) {
+        std::cerr << "GLFW error " << code << ": " << msg << std::endl;
+        });
+
+    glfwWindowHint(GLFW_AUTO_ICONIFY, GLFW_FALSE);   
+
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+    glfwWindowHint(GLFW_RED_BITS, mode->redBits);
+    glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+    glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
+    glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+
+    WINDOW_WIDTH = mode->width;
+    WINDOW_HEIGHT = mode->height;
+
     // create the application window and context
-    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "WOOHP Elevator", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "WOOHP Elevator", monitor, nullptr);
 
     if (window == nullptr)
     {
@@ -404,6 +512,9 @@ int main()
     }
 
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(0);
+
+    playerWidth = playerHeight * (PLAYER_IMG_W / PLAYER_IMG_H) * ((float)WINDOW_HEIGHT / WINDOW_WIDTH);
 
     // load cursors
     cursor = loadImageToCursor("img/black_propeller.png");
@@ -418,6 +529,7 @@ int main()
 
     // register callback functions
     glfwSetMouseButtonCallback(window, mouseCallback);
+    glfwSetKeyCallback(window, keyboardCallback);
 
     // initialize GLEW
     if (glewInit() != GLEW_OK)
@@ -432,7 +544,7 @@ int main()
     );
 
     // load font
-    if (!initText("fonts/segoeui.ttf", 48, WINDOW_WIDTH, WINDOW_HEIGHT))
+    if (!initText("fonts/segoeui.ttf", 72, WINDOW_WIDTH, WINDOW_HEIGHT))
     {
         return terminateWithError("Failed to load font.");
     }
@@ -440,6 +552,12 @@ int main()
     // load textures
     unsigned int player;
     preprocessTexture(player, "img/player_idle.png");
+
+    unsigned int playerWalk;
+    preprocessTexture(playerWalk, "img/player_walking.png");
+
+    unsigned int studentTag;
+    preprocessTexture(studentTag, "img/student_tag.png");
 
     // enable blending for transparency
     glEnable(GL_BLEND);
@@ -976,6 +1094,40 @@ int main()
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(5 * sizeof(float)));
     glEnableVertexAttribArray(2);
 
+
+    constexpr float TAG_IMG_W = 300.0f, TAG_IMG_H = 124.0f;  
+    float tagH = 0.10f;
+    float tagW = tagH * (TAG_IMG_W / TAG_IMG_H) * ((float)WINDOW_HEIGHT / WINDOW_WIDTH);
+    float tx0 = -0.99f, ty0 = -0.99f, tx1 = tx0 + tagW, ty1 = ty0 + tagH;
+
+    float tagVertices[] = {
+        tx0, ty0, 1,1,1, 0,0,
+        tx0, ty1, 1,1,1, 0,1,
+        tx1, ty1, 1,1,1, 1,1,
+        tx1, ty0, 1,1,1, 1,0,
+    };
+
+    // VAO and VBO definition
+    unsigned int tagVAO;
+    unsigned int tagVBO;
+
+    glGenVertexArrays(1, &tagVAO);
+    glGenBuffers(1, &tagVBO);
+
+    glBindVertexArray(tagVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, tagVBO);
+
+    glBufferData(GL_ARRAY_BUFFER, sizeof(tagVertices), tagVertices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(5 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+
     // set the background color
     glClearColor(0.08f, 0.09f, 0.10f, 1.0f);
 
@@ -983,6 +1135,21 @@ int main()
     int uPosLoc = glGetUniformLocation(shaderProgram, "uPos");
     int uUseTexLoc = glGetUniformLocation(shaderProgram, "uUseTex");
     int uFlipLoc = glGetUniformLocation(shaderProgram, "uFlip");
+    int uAlphaLoc = glGetUniformLocation(shaderProgram, "uAlpha");
+
+    auto drawPlayer = [&]() {
+        unsigned int tex = (isWalking && ((int)(walkTimer * 8.0f) % 2 == 1)) ? playerWalk : player;
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glUniform1i(uUseTexLoc, true);
+        glUniform2f(uPosLoc, playerX, playerY);
+        glUniform1i(uFlipLoc, facingLeft);
+        glBindVertexArray(playerVAO);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+        glUniform1i(uUseTexLoc, false);
+        glUniform1i(uFlipLoc, false);
+        };
 
     // get the current time before entering the rendering loop
     double lastTime = glfwGetTime();
@@ -990,6 +1157,7 @@ int main()
     // main rendering loop
     while (!glfwWindowShouldClose(window))
     {
+        auto frameStart = std::chrono::steady_clock::now();
         // get the current time
         double now = glfwGetTime();
 
@@ -999,8 +1167,11 @@ int main()
         // update the previous frame time
         lastTime = now;
 
+        if (delta > 0.05f) delta = 0.05f;
+
         // elevator vertical position
         updateElevator(window);
+        updatePlayer(window);
 
         // calculate the difference between its current position and its original position
         float elevatorOffset = elevatorY - floorHeight[2];
@@ -1013,6 +1184,7 @@ int main()
         glUniform2f(uPosLoc, 0.0f, 0.0f);
         glUniform1i(uUseTexLoc, false);
         glUniform1i(uFlipLoc, false);
+        glUniform1f(uAlphaLoc, 1.0f);
 
         // draw the control panel area background
         glBindVertexArray(controlPanelVAO);
@@ -1041,41 +1213,36 @@ int main()
         // door center lines
         glDrawArrays(GL_LINES, 64, 16);
 
-        // set the elevator's vertical position using the calculated offset
+        // elevator frame + interior (no clipping)
         glUniform2f(uPosLoc, 0.0f, elevatorOffset);
         glBindVertexArray(elevatorVAO);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);   // frame
+        glDrawArrays(GL_TRIANGLE_FAN, 4, 4);   // interior
 
-        // draw elevator frame (not clipped)
-        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+        // player (in the hallway or in the cabin)
+        drawPlayer();
 
-        // calculate elevator clipping rectangle (cabin interior)
+        // doors, clipped so they don't leave the cabin
+        glBindVertexArray(elevatorVAO);        // drawPlayer changed the VAO
         int clipX = (int)((0.81f + 1.0f) / 2.0f * WINDOW_WIDTH);
         int clipY = (int)((-0.47f + elevatorOffset + 1.0f) / 2.0f * WINDOW_HEIGHT);
         int clipWidth = (int)((0.95f - 0.81f) / 2.0f * WINDOW_WIDTH);
         int clipHeight = (int)((-0.29f + 0.47f) / 2.0f * WINDOW_HEIGHT);
 
-        // enable clipping so the door halves don't leave the cabin
         glEnable(GL_SCISSOR_TEST);
         glScissor(clipX, clipY, clipWidth, clipHeight);
 
-        // draw cabin interior
-        glDrawArrays(GL_TRIANGLE_FAN, 4, 4);
-
         float doorMove = doorOpenAmount * 0.07f;
-
-        // draw left half door
+        glUniform1f(uAlphaLoc, 0.5f);
         glUniform2f(uPosLoc, -doorMove, elevatorOffset);
         glDrawArrays(GL_TRIANGLE_FAN, 8, 4);
-
-        // draw right half door
         glUniform2f(uPosLoc, doorMove, elevatorOffset);
         glDrawArrays(GL_TRIANGLE_FAN, 12, 4);
+        glUniform1f(uAlphaLoc, 1.0f);
 
-        // disable clipping, otherwise glClear and everything else gets clipped
         glDisable(GL_SCISSOR_TEST);
 
         if (doorOpenAmount == 0) {
-            // elevator door center line
             glUniform2f(uPosLoc, 0.0f, elevatorOffset);
             glDrawArrays(GL_LINES, 16, 2);
         }
@@ -1103,35 +1270,19 @@ int main()
                 glDrawArrays(GL_LINE_LOOP, 32 + i * 4, 4);
             }
         }
-        
-        // define player movement
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-            if (playerX - playerSpeed * delta >= playerLeft)
-            {
-                facingRight = true;
-                playerX -= playerSpeed * delta;
                 
-            }
-        }
-
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-            if (playerX + playerSpeed * delta + playerWidth <= playerRight) 
-            {
-                facingRight = false;
-                playerX += playerSpeed * delta;
-            }
-        }
-
-        // draw player
+        // draw student tag
+        glUniform1f(uAlphaLoc, 0.8f);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, player);
+        glBindTexture(GL_TEXTURE_2D, studentTag);
         glUniform1i(uUseTexLoc, true);
-        glUniform2f(uPosLoc, playerX, playerY);
-        glUniform1i(uFlipLoc, facingRight);
-        glBindVertexArray(playerVAO);
+        glUniform2f(uPosLoc, 0.0f, 0.0f);
+        glUniform1i(uFlipLoc, false);
+        glBindVertexArray(tagVAO);
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
         glUniform1i(uUseTexLoc, false);
-
+        glUniform1i(uFlipLoc, false);
+        glUniform1f(uAlphaLoc, 1.0f);
 
         // draw text 
         // header for control panel
@@ -1177,6 +1328,13 @@ int main()
 
         glfwSwapBuffers(window);
         glfwPollEvents();
+
+        auto frameEnd = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsed = frameEnd - frameStart;
+        double remaining = FRAME_TIME - elapsed.count();
+        if (remaining > 0.002)
+            std::this_thread::sleep_for(std::chrono::duration<double>(remaining - 0.002));
+        while (std::chrono::duration<double>(std::chrono::steady_clock::now() - frameStart).count() < FRAME_TIME) {}
     }
 
     // release OpenGL resources
@@ -1195,6 +1353,8 @@ int main()
     glDeleteBuffers(1, &elevatorVBO);
     glDeleteVertexArrays(1, &buttonFrameVAO);
     glDeleteBuffers(1, &buttonFrameVBO);
+    glDeleteVertexArrays(1, &playerVAO);
+    glDeleteBuffers(1, &playerVBO);
     cleanupText();
 
     // close the application.

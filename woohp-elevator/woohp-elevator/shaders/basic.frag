@@ -6,12 +6,10 @@ out vec4 outCol;
 
 uniform sampler2D uTex;
 uniform bool uUseTex;
+uniform float uAlpha;
 
 void main()
 {
-    if (uUseTex) {
-        outCol = texture(uTex, chTex);
-    } else {
-        outCol = chCol;
-    }
+    vec4 color = uUseTex ? texture(uTex, chTex) : chCol;
+    outCol = vec4(color.rgb, color.a * uAlpha);
 }
